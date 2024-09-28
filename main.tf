@@ -176,3 +176,40 @@ resource "aws_lambda_permission" "api_gw" {
 
   source_arn = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
 }
+# Lookup Route 53 zone by domain name
+data "aws_route53_zone" "zone" {
+  name = "sctp-sandbox.com"
+}
+
+# ACM module to create an SSL certificate for the custom domain
+module "acm" {
+  source  = "terraform-aws-modules/acm/aws"
+  version = "~> 4.0"
+
+  domain_name       = "${local.name_prefix}.sctp-sandbox.com"
+  zone_id           = data.aws_route53_zone.zone.zone_id
+  validation_method = "DNS"
+}
+# Define the custom domain name for the API Gateway
+resource "aws_apigatewayv2_domain_name" "http-api" {
+  domain_name = "${local.name_prefix}.sctp-sandbox.com"
+
+  domain_name_configuration {
+    certificate_arn = module.acm.acm_certificate_arn
+    endpoint_type   = "REGIONAL"
+    security_policy = "TLS_1_2"
+  }
+}
+
+# Route53 record for the API Gateway domain
+resource "aws_route53_record" "http-api" {
+  zone_id = data.aws_route53_zone.zone.zone_id
+  name    = "${local.name_prefix}.sctp-sandbox.com"
+  type    = "A"
+
+  alias {
+    name                   = aws_apigatewayv2_domain_name.http-api.domain_name_configuration[0].target_domain_name
+    zone_id                = aws_apigatewayv2_domain_name.http-api.domain_name_configuration[0].hosted_zone_id
+    evaluate_target_health = false
+  }
+}
